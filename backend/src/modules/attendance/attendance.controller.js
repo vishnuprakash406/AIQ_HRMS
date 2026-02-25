@@ -14,10 +14,13 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 }
 
 // Check if employee is inside any geofence zone
-async function validateGeofenceLocation(latitude, longitude) {
+async function validateGeofenceLocation(latitude, longitude, companyId) {
   try {
+    const whereClause = companyId ? 'WHERE is_active = true AND company_id = $1' : 'WHERE is_active = true';
+    const params = companyId ? [companyId] : [];
     const result = await pool.query(
-      'SELECT id, name, latitude, longitude, radius_meters FROM geofence_zones WHERE is_active = true'
+      `SELECT id, name, latitude, longitude, radius_meters FROM geofence_zones ${whereClause}`,
+      params
     );
     
     const zones = result.rows;
@@ -52,7 +55,7 @@ export async function checkIn(req, res) {
     
     // Get user UUID from email
     const userResult = await pool.query(
-      'SELECT id FROM users WHERE LOWER(email) = $1 OR LOWER(phone) = $1',
+      'SELECT id, company_id FROM users WHERE LOWER(email) = $1 OR LOWER(phone) = $1',
       [userEmail.toLowerCase()]
     );
     
@@ -61,9 +64,10 @@ export async function checkIn(req, res) {
     }
     
     const userId = userResult.rows[0].id;
+    const companyId = userResult.rows[0].company_id;
     
     // Validate geofence
-    const geofenceCheck = await validateGeofenceLocation(parseFloat(latitude), parseFloat(longitude));
+    const geofenceCheck = await validateGeofenceLocation(parseFloat(latitude), parseFloat(longitude), companyId);
     
     // Check if already checked in
     const existingCheckIn = await pool.query(
@@ -105,7 +109,7 @@ export async function checkOut(req, res) {
     
     // Get user UUID from email
     const userResult = await pool.query(
-      'SELECT id FROM users WHERE LOWER(email) = $1 OR LOWER(phone) = $1',
+      'SELECT id, company_id FROM users WHERE LOWER(email) = $1 OR LOWER(phone) = $1',
       [userEmail.toLowerCase()]
     );
     
@@ -114,9 +118,10 @@ export async function checkOut(req, res) {
     }
     
     const userId = userResult.rows[0].id;
+    const companyId = userResult.rows[0].company_id;
     
     // Validate geofence
-    const geofenceCheck = await validateGeofenceLocation(parseFloat(latitude), parseFloat(longitude));
+    const geofenceCheck = await validateGeofenceLocation(parseFloat(latitude), parseFloat(longitude), companyId);
     
     // Find today's check-in
     const checkInRecord = await pool.query(
@@ -159,12 +164,15 @@ export async function checkOut(req, res) {
 export async function getAttendanceStatus(req, res) {
   try {
     const { employeeId } = req.params; // This is actually email
+    const requesterRole = req.user?.role;
+    const requesterBranchId = req.user?.branch_id;
+    const requesterCompanyId = req.user?.company_id;
     
     console.log(`[Attendance Status] Request for employee: ${employeeId}`);
     
     // Get user UUID from email
     const userResult = await pool.query(
-      'SELECT id FROM users WHERE LOWER(email) = $1 OR LOWER(phone) = $1',
+      'SELECT id, company_id, branch_id, email, phone FROM users WHERE LOWER(email) = $1 OR LOWER(phone) = $1',
       [employeeId.toLowerCase()]
     );
     
@@ -172,7 +180,20 @@ export async function getAttendanceStatus(req, res) {
       return res.status(404).json({ message: 'User not found' });
     }
     
-    const userId = userResult.rows[0].id;
+    const targetUser = userResult.rows[0];
+    const userId = targetUser.id;
+    const targetKey = (targetUser.email || targetUser.phone || '').toLowerCase();
+    const requesterKey = (req.user?.sub || '').toLowerCase();
+
+    if (requesterRole === 'employee' && requesterKey !== targetKey) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    if (requesterRole === 'branch_manager') {
+      if (!requesterBranchId || requesterCompanyId !== targetUser.company_id || requesterBranchId !== targetUser.branch_id) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+    }
     console.log(`[Attendance Status] Found user UUID: ${userId}`);
     
     // Get today's attendance
@@ -219,10 +240,13 @@ export async function getAttendanceHistory(req, res) {
   try {
     const { employeeId } = req.params; // This is actually email
     const { days = 30 } = req.query;
+    const requesterRole = req.user?.role;
+    const requesterBranchId = req.user?.branch_id;
+    const requesterCompanyId = req.user?.company_id;
     
     // Get user UUID from email
     const userResult = await pool.query(
-      'SELECT id FROM users WHERE LOWER(email) = $1 OR LOWER(phone) = $1',
+      'SELECT id, company_id, branch_id, email, phone FROM users WHERE LOWER(email) = $1 OR LOWER(phone) = $1',
       [employeeId.toLowerCase()]
     );
     
@@ -230,7 +254,20 @@ export async function getAttendanceHistory(req, res) {
       return res.status(404).json({ message: 'User not found' });
     }
     
-    const userId = userResult.rows[0].id;
+    const targetUser = userResult.rows[0];
+    const userId = targetUser.id;
+    const targetKey = (targetUser.email || targetUser.phone || '').toLowerCase();
+    const requesterKey = (req.user?.sub || '').toLowerCase();
+
+    if (requesterRole === 'employee' && requesterKey !== targetKey) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    if (requesterRole === 'branch_manager') {
+      if (!requesterBranchId || requesterCompanyId !== targetUser.company_id || requesterBranchId !== targetUser.branch_id) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+    }
     
     const result = await pool.query(
       `SELECT id, check_in, check_out, check_in_lat, check_in_lng, check_out_lat, check_out_lng,
@@ -251,9 +288,25 @@ export async function getAttendanceHistory(req, res) {
 // Admin endpoints for geofence management
 export async function getGeofenceZones(req, res) {
   try {
-    const result = await pool.query(
-      'SELECT id, name, latitude, longitude, radius_meters, description, is_active, created_at FROM geofence_zones ORDER BY name'
-    );
+    const companyId = req.user?.company_id;
+    const branchId = req.user?.branch_id;
+    
+    let query = 'SELECT id, name, latitude, longitude, radius_meters, description, is_active, company_id, branch_id, created_at FROM geofence_zones';
+    const params = [];
+    
+    if (req.user?.role === 'company_admin') {
+      query += ' WHERE company_id = $1';
+      params.push(companyId);
+    } else if (req.user?.role === 'branch_manager') {
+      if (!branchId) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      query += ' WHERE company_id = $1 AND (branch_id = $2 OR branch_id IS NULL)';
+      params.push(companyId, branchId);
+    }
+    
+    query += ' ORDER BY name';
+    const result = await pool.query(query, params);
     return res.json({ zones: result.rows });
   } catch (err) {
     console.error('Get geofence zones error:', err);
@@ -264,16 +317,20 @@ export async function getGeofenceZones(req, res) {
 export async function createGeofenceZone(req, res) {
   try {
     const { name, latitude, longitude, radius_meters, description } = req.body;
+    const companyId = req.user?.company_id;
+    const branchId = req.user?.branch_id;
     
     if (!name || !latitude || !longitude || !radius_meters) {
       return res.status(400).json({ message: 'name, latitude, longitude, and radius_meters are required' });
     }
     
+    const zoneBranchId = req.user?.role === 'branch_manager' ? branchId : null;
+    
     const result = await pool.query(
-      `INSERT INTO geofence_zones (name, latitude, longitude, radius_meters, description)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, name, latitude, longitude, radius_meters, description, is_active, created_at`,
-      [name, latitude, longitude, radius_meters, description || null]
+      `INSERT INTO geofence_zones (name, latitude, longitude, radius_meters, description, company_id, branch_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, name, latitude, longitude, radius_meters, description, is_active, company_id, branch_id, created_at`,
+      [name, latitude, longitude, radius_meters, description || null, companyId || null, zoneBranchId]
     );
     
     return res.json({ message: 'Geofence zone created', zone: result.rows[0] });
@@ -287,6 +344,28 @@ export async function updateGeofenceZone(req, res) {
   try {
     const { id } = req.params;
     const { name, latitude, longitude, radius_meters, description, is_active } = req.body;
+    const companyId = req.user?.company_id;
+    const branchId = req.user?.branch_id;
+    
+    // Verify zone belongs to company/branch if company_admin or branch_manager
+    let verifyQuery = 'SELECT id FROM geofence_zones WHERE id = $1';
+    let verifyParams = [id];
+    
+    if (req.user?.role === 'company_admin') {
+      verifyQuery += ' AND company_id = $2';
+      verifyParams.push(companyId);
+    } else if (req.user?.role === 'branch_manager') {
+      if (!branchId) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      verifyQuery += ' AND company_id = $2 AND branch_id = $3';
+      verifyParams.push(companyId, branchId);
+    }
+    
+    const verifyResult = await pool.query(verifyQuery, verifyParams);
+    if (verifyResult.rows.length === 0) {
+      return res.status(403).json({ message: 'Unauthorized: Zone does not belong to your company/branch' });
+    }
     
     const result = await pool.query(
       `UPDATE geofence_zones 
@@ -298,7 +377,7 @@ export async function updateGeofenceZone(req, res) {
            is_active = COALESCE($6, is_active),
            updated_at = NOW()
        WHERE id = $7
-       RETURNING id, name, latitude, longitude, radius_meters, description, is_active, created_at`,
+       RETURNING id, name, latitude, longitude, radius_meters, description, is_active, company_id, branch_id, created_at`,
       [name, latitude, longitude, radius_meters, description, is_active, id]
     );
     
@@ -316,6 +395,28 @@ export async function updateGeofenceZone(req, res) {
 export async function deleteGeofenceZone(req, res) {
   try {
     const { id } = req.params;
+    const companyId = req.user?.company_id;
+    const branchId = req.user?.branch_id;
+    
+    // Verify zone belongs to company/branch if company_admin or branch_manager
+    let verifyQuery = 'SELECT id FROM geofence_zones WHERE id = $1';
+    let verifyParams = [id];
+    
+    if (req.user?.role === 'company_admin') {
+      verifyQuery += ' AND company_id = $2';
+      verifyParams.push(companyId);
+    } else if (req.user?.role === 'branch_manager') {
+      if (!branchId) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      verifyQuery += ' AND company_id = $2 AND branch_id = $3';
+      verifyParams.push(companyId, branchId);
+    }
+    
+    const verifyResult = await pool.query(verifyQuery, verifyParams);
+    if (verifyResult.rows.length === 0) {
+      return res.status(403).json({ message: 'Unauthorized: Zone does not belong to your company/branch' });
+    }
     
     const result = await pool.query(
       'DELETE FROM geofence_zones WHERE id = $1 RETURNING id',

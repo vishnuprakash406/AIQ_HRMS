@@ -17,10 +17,10 @@ export default function AdminLeave() {
       setLoading(true);
       const [leaveRes, empRes] = await Promise.all([
         api.get('/leave/all').catch(() => ({ data: { leaves: [] } })),
-        api.get('/auth/employees').catch(() => ({ data: { employees: [] } }))
+        api.get('/company/employees').catch(() => ({ data: { data: { employees: [] } } }))
       ]);
       setLeaves(leaveRes.data.leaves || []);
-      setEmployees(empRes.data.employees || []);
+      setEmployees(empRes.data.data?.employees || empRes.data.employees || []);
     } catch (err) {
       setMessage('Error fetching data');
       console.error(err);

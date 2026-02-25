@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../../middleware/auth.js';
+import { authenticate, requireRole, requireBranchModule } from '../../middleware/auth.js';
 import { requireFields } from '../../middleware/validate.js';
 import { pool } from '../../db/pool.js';
 import { onboardingUpload } from '../../middleware/upload.js';
@@ -8,18 +8,30 @@ const router = Router();
 
 async function getUserIdFromAuth(req) {
   const userKey = (req.user?.sub || '').toLowerCase();
+  const companyId = req.user?.company_id;
   if (!userKey) return null;
 
   const result = await pool.query(
-    'SELECT id FROM users WHERE LOWER(email) = $1 OR LOWER(phone) = $1',
-    [userKey]
+    'SELECT id FROM users WHERE (LOWER(email) = $1 OR LOWER(phone) = $1) AND company_id = $2',
+    [userKey, companyId]
   );
 
   return result.rows[0]?.id || null;
 }
 
-async function getUserIdByParam(userId) {
-  const result = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
+async function getUserIdByParam(userId, companyId) {
+  const result = await pool.query(
+    'SELECT id FROM users WHERE id = $1 AND company_id = $2',
+    [userId, companyId]
+  );
+  return result.rows[0]?.id || null;
+}
+
+async function getUserIdByParamBranch(userId, companyId, branchId) {
+  const result = await pool.query(
+    'SELECT id FROM users WHERE id = $1 AND company_id = $2 AND branch_id = $3',
+    [userId, companyId, branchId]
+  );
   return result.rows[0]?.id || null;
 }
 
@@ -53,11 +65,14 @@ router.get('/tasks', authenticate, async (req, res) => {
 });
 
 // Get all onboarding task templates (admin only)
-router.get('/templates', authenticate, requireRole(['admin']), async (req, res) => {
+router.get('/templates', authenticate, requireRole(['admin', 'company_admin', 'branch_manager']), requireBranchModule('onboarding'), async (req, res) => {
   try {
+    const companyId = req.user?.company_id;
+    const whereClause = req.user?.role === 'admin' ? '' : 'AND company_id = $2';
+    const params = req.user?.role === 'admin' ? ['onboarding'] : ['onboarding', companyId];
     const result = await pool.query(
-      'SELECT id, title, file_url as description, created_at FROM documents WHERE kind = $1 ORDER BY created_at DESC',
-      ['onboarding']
+      `SELECT id, title, file_url as description, created_at FROM documents WHERE kind = $1 ${whereClause} ORDER BY created_at DESC`,
+      params
     );
     
     return res.json({ templates: result.rows });
@@ -72,10 +87,11 @@ router.post('/templates', authenticate, requireRole(['admin']), requireFields(['
   try {
     const { title, description } = req.body;
     const admin_id = req.user?.sub;
+    const companyId = req.user?.company_id;
     
     const result = await pool.query(
-      'INSERT INTO documents (kind, owner_id, title, file_url) VALUES ($1, $2, $3, $4) RETURNING id, title, file_url as description, created_at',
-      ['onboarding', admin_id, title, description || null]
+      'INSERT INTO documents (kind, owner_id, title, file_url, company_id) VALUES ($1, $2, $3, $4, $5) RETURNING id, title, file_url as description, created_at',
+      ['onboarding', admin_id, title, description || null, companyId]
     );
     
     return res.json({ message: 'Task template created', template: result.rows[0] });
@@ -89,10 +105,13 @@ router.post('/templates', authenticate, requireRole(['admin']), requireFields(['
 router.delete('/templates/:id', authenticate, requireRole(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
+    const companyId = req.user?.company_id;
+    const whereClause = req.user?.role === 'admin' ? 'id = $1 AND kind = $2' : 'id = $1 AND kind = $2 AND company_id = $3';
+    const params = req.user?.role === 'admin' ? [id, 'onboarding'] : [id, 'onboarding', companyId];
     
     const result = await pool.query(
-      'DELETE FROM documents WHERE id = $1 AND kind = $2 RETURNING id',
-      [id, 'onboarding']
+      `DELETE FROM documents WHERE ${whereClause} RETURNING id`,
+      params
     );
     
     if (result.rows.length === 0) {
@@ -107,13 +126,34 @@ router.delete('/templates/:id', authenticate, requireRole(['admin']), async (req
 });
 
 // Assign onboarding tasks to employee (admin only)
-router.post('/assign/:userId', authenticate, requireRole(['admin']), requireFields(['taskIds']), async (req, res) => {
+router.post('/assign/:userId', authenticate, requireRole(['admin', 'company_admin', 'branch_manager']), requireBranchModule('onboarding'), requireFields(['taskIds']), async (req, res) => {
   try {
     const { userId } = req.params;
     const { taskIds } = req.body; // Array of task IDs
+    const companyId = req.user?.company_id;
     
     if (!Array.isArray(taskIds) || taskIds.length === 0) {
       return res.status(400).json({ message: 'taskIds must be a non-empty array' });
+    }
+    
+    // Verify user belongs to company
+    let userCheck;
+    if (req.user?.role === 'branch_manager') {
+      if (!req.user?.branch_id) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      userCheck = await pool.query(
+        'SELECT id FROM users WHERE id = $1 AND company_id = $2 AND branch_id = $3',
+        [userId, companyId, req.user.branch_id]
+      );
+    } else {
+      userCheck = await pool.query(
+        'SELECT id FROM users WHERE id = $1 AND company_id = $2',
+        [userId, companyId]
+      );
+    }
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found in your company' });
     }
     
     // Create checklist entries for each task
@@ -182,12 +222,22 @@ router.get('/profile', authenticate, async (req, res) => {
 });
 
 // Admin: Get employee onboarding profile
-router.get('/profile/:userId', authenticate, requireRole(['admin']), async (req, res) => {
+router.get('/profile/:userId', authenticate, requireRole(['admin', 'company_admin', 'branch_manager']), requireBranchModule('onboarding'), async (req, res) => {
   try {
     const { userId } = req.params;
-    const resolvedId = await getUserIdByParam(userId);
+    const companyId = req.user?.company_id;
+    let resolvedId;
+
+    if (req.user?.role === 'branch_manager') {
+      if (!req.user?.branch_id) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      resolvedId = await getUserIdByParamBranch(userId, companyId, req.user.branch_id);
+    } else {
+      resolvedId = await getUserIdByParam(userId, companyId);
+    }
     if (!resolvedId) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: 'User not found in your company' });
     }
 
     const result = await pool.query(
@@ -209,9 +259,10 @@ router.get('/profile/:userId', authenticate, requireRole(['admin']), async (req,
 router.put('/profile/:userId', authenticate, requireRole(['admin']), async (req, res) => {
   try {
     const { userId } = req.params;
-    const resolvedId = await getUserIdByParam(userId);
+    const companyId = req.user?.company_id;
+    const resolvedId = await getUserIdByParam(userId, companyId);
     if (!resolvedId) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: 'User not found in your company' });
     }
 
     const {
@@ -290,9 +341,10 @@ router.put('/profile/:userId', authenticate, requireRole(['admin']), async (req,
 router.post('/documents/:userId', authenticate, requireRole(['admin']), onboardingUpload.single('file'), async (req, res) => {
   try {
     const { userId } = req.params;
-    const resolvedId = await getUserIdByParam(userId);
+    const companyId = req.user?.company_id;
+    const resolvedId = await getUserIdByParam(userId, companyId);
     if (!resolvedId) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: 'User not found in your company' });
     }
 
     if (!req.file) {
@@ -303,8 +355,8 @@ router.post('/documents/:userId', authenticate, requireRole(['admin']), onboardi
     const fileUrl = `/uploads/onboarding/${req.file.filename}`;
 
     const result = await pool.query(
-      'INSERT INTO documents (kind, owner_id, title, file_url) VALUES ($1, $2, $3, $4) RETURNING id, title, file_url, created_at',
-      ['onboarding_doc', resolvedId, title || req.file.originalname, fileUrl]
+      'INSERT INTO documents (kind, owner_id, title, file_url, company_id) VALUES ($1, $2, $3, $4, $5) RETURNING id, title, file_url, created_at',
+      ['onboarding_doc', resolvedId, title || req.file.originalname, fileUrl, companyId]
     );
 
     return res.json({ message: 'Document uploaded', document: result.rows[0] });
@@ -338,9 +390,10 @@ router.get('/documents', authenticate, async (req, res) => {
 router.get('/documents/:userId', authenticate, requireRole(['admin']), async (req, res) => {
   try {
     const { userId } = req.params;
-    const resolvedId = await getUserIdByParam(userId);
+    const companyId = req.user?.company_id;
+    const resolvedId = await getUserIdByParam(userId, companyId);
     if (!resolvedId) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(404).json({ message: 'User not found in your company' });
     }
 
     const result = await pool.query(

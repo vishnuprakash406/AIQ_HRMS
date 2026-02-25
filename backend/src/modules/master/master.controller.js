@@ -126,12 +126,44 @@ export async function createMaster(req, res) {
  */
 export async function createCompany(req, res) {
   try {
-    const { company_code, name, username, password, email, contact_number, employee_limit = 50, default_modules = [] } = req.body;
+    const {
+      company_code,
+      name,
+      username,
+      password,
+      email,
+      contact_number,
+      employee_limit = 50,
+      branch_limit = 1,
+      branches = [],
+      default_modules = []
+    } = req.body;
 
     if (!company_code || !name || !username || !password) {
       return res.status(400).json({
         status: 'error',
         message: 'company_code, name, username, and password are required'
+      });
+    }
+
+    if (!Number.isInteger(branch_limit) || branch_limit < 1) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'branch_limit must be an integer of at least 1'
+      });
+    }
+
+    if (!Array.isArray(branches)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'branches must be an array'
+      });
+    }
+
+    if (branches.length > branch_limit) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'branches count exceeds branch_limit'
       });
     }
 
@@ -144,8 +176,8 @@ export async function createCompany(req, res) {
 
       // Insert company
       const companyResult = await client.query(
-        'INSERT INTO companies (company_code, name, username, password_hash, email, contact_number, employee_limit) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, company_code, name, employee_limit',
-        [company_code, name, username, hashedPassword, email || null, contact_number || null, employee_limit]
+        'INSERT INTO companies (company_code, name, username, password_hash, email, contact_number, employee_limit, branch_limit) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, company_code, name, employee_limit, branch_limit',
+        [company_code, name, username, hashedPassword, email || null, contact_number || null, employee_limit, branch_limit]
       );
 
       const company = companyResult.rows[0];
@@ -169,6 +201,24 @@ export async function createCompany(req, res) {
         await client.query(
           'INSERT INTO company_modules (company_id, module_name, is_enabled) VALUES ($1, $2, $3)',
           [company.id, module, isEnabled]
+        );
+      }
+
+      if (branches.length > 0) {
+        for (const branch of branches) {
+          if (!branch?.name) {
+            throw new Error('Branch name is required');
+          }
+          const branchLimit = Number.isInteger(branch.employee_limit) ? branch.employee_limit : 0;
+          await client.query(
+            'INSERT INTO branches (company_id, name, employee_limit) VALUES ($1, $2, $3)',
+            [company.id, branch.name.trim(), branchLimit]
+          );
+        }
+      } else {
+        await client.query(
+          'INSERT INTO branches (company_id, name, employee_limit) VALUES ($1, $2, $3)',
+          [company.id, 'Main Branch', 0]
         );
       }
 
@@ -207,6 +257,12 @@ export async function createCompany(req, res) {
         message: 'Company code or username already exists'
       });
     }
+    if (error.message === 'Branch name is required') {
+      return res.status(400).json({
+        status: 'error',
+        message: error.message
+      });
+    }
     console.error('Create company error:', error);
     return res.status(500).json({
       status: 'error',
@@ -224,7 +280,7 @@ export async function createCompany(req, res) {
 export async function getAllCompanies(req, res) {
   try {
     const result = await pool.query(
-      'SELECT id, company_code, name, employee_limit, is_active, created_at FROM companies ORDER BY created_at DESC'
+      'SELECT id, company_code, name, employee_limit, branch_limit, is_active, created_at FROM companies ORDER BY created_at DESC'
     );
 
     return res.status(200).json({
@@ -253,7 +309,7 @@ export async function getCompanyDetails(req, res) {
 
     // Get company info
     const companyResult = await pool.query(
-      'SELECT id, company_code, name, email, contact_number, employee_limit, is_active, created_at FROM companies WHERE id = $1',
+      'SELECT id, company_code, name, email, contact_number, employee_limit, branch_limit, is_active, created_at FROM companies WHERE id = $1',
       [companyId]
     );
 
@@ -278,13 +334,23 @@ export async function getCompanyDetails(req, res) {
       [companyId]
     );
 
+    const branchesResult = await pool.query(
+      `SELECT b.id, b.name, b.employee_limit, b.is_active, b.created_at,
+              (SELECT COUNT(*) FROM users u WHERE u.branch_id = b.id) as employee_count
+       FROM branches b
+       WHERE b.company_id = $1
+       ORDER BY b.created_at`,
+      [companyId]
+    );
+
     return res.status(200).json({
       status: 'success',
       message: 'Company details retrieved successfully',
       data: {
         ...company,
         modules: modulesResult.rows,
-        employee_count: parseInt(employeeResult.rows[0].count, 10)
+        employee_count: parseInt(employeeResult.rows[0].count, 10),
+        branches: branchesResult.rows
       }
     });
   } catch (error) {
@@ -306,7 +372,7 @@ export async function getCompanyDetails(req, res) {
 export async function updateCompany(req, res) {
   try {
     const { companyId } = req.params;
-    const { name, email, contact_number, employee_limit, is_active } = req.body;
+    const { name, email, contact_number, employee_limit, branch_limit, is_active } = req.body;
 
     const updates = [];
     const values = [companyId];
@@ -332,6 +398,31 @@ export async function updateCompany(req, res) {
       values.push(employee_limit);
       paramIndex++;
     }
+    if (branch_limit !== undefined) {
+      if (!Number.isInteger(branch_limit) || branch_limit < 1) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'branch_limit must be an integer of at least 1'
+        });
+      }
+
+      const branchCountResult = await pool.query(
+        'SELECT COUNT(*) FROM branches WHERE company_id = $1',
+        [companyId]
+      );
+
+      const branchCount = parseInt(branchCountResult.rows[0].count, 10);
+      if (branch_limit < branchCount) {
+        return res.status(400).json({
+          status: 'error',
+          message: `branch_limit cannot be less than current branches (${branchCount})`
+        });
+      }
+
+      updates.push(`branch_limit = $${paramIndex}`);
+      values.push(branch_limit);
+      paramIndex++;
+    }
     if (is_active !== undefined) {
       updates.push(`is_active = $${paramIndex}`);
       values.push(is_active);
@@ -348,7 +439,7 @@ export async function updateCompany(req, res) {
     updates.push(`updated_at = now()`);
 
     const result = await pool.query(
-      `UPDATE companies SET ${updates.join(', ')} WHERE id = $1 RETURNING id, company_code, name, email, contact_number, employee_limit, is_active`,
+      `UPDATE companies SET ${updates.join(', ')} WHERE id = $1 RETURNING id, company_code, name, email, contact_number, employee_limit, branch_limit, is_active`,
       values
     );
 

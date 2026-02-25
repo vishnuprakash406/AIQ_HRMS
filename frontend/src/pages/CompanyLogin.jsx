@@ -20,6 +20,21 @@ export default function CompanyLogin() {
     }));
   };
 
+  // Helper function to decode JWT token and extract user_id
+  const decodeToken = (token) => {
+    try {
+      const base64Url = token.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(atob(base64).split('').map((c) => {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+      return JSON.parse(jsonPayload);
+    } catch (err) {
+      console.error('Error decoding token:', err);
+      return null;
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -37,12 +52,23 @@ export default function CompanyLogin() {
       const data = await response.json();
 
       if (response.ok) {
+        const role = data.role || 'company_admin';
         // Store token and company info in localStorage
         localStorage.setItem('companyToken', data.token);
-        localStorage.setItem('userRole', 'company_admin');
+        localStorage.setItem('userRole', role);
         localStorage.setItem('company_id', data.company_id);
         localStorage.setItem('company_name', data.company_name);
         localStorage.setItem('modules', JSON.stringify(data.modules));
+        localStorage.setItem('branch_id', data.branch_id || '');
+        localStorage.setItem('branch_name', data.branch_name || '');
+
+        // Decode token and extract user_id for branch managers
+        if (role === 'branch_manager') {
+          const decodedToken = decodeToken(data.token);
+          if (decodedToken && decodedToken.user_id) {
+            localStorage.setItem('manager_id', decodedToken.user_id);
+          }
+        }
 
         // Redirect to company dashboard
         navigate('/company-dashboard');
@@ -79,16 +105,19 @@ export default function CompanyLogin() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="username">👤 Username</label>
+            <label htmlFor="username">👤 Username / Employee Code</label>
             <input
               type="text"
               id="username"
               name="username"
               value={formData.username}
               onChange={handleChange}
-              placeholder="Enter your username"
+              placeholder="Email, Phone, or Employee Code"
               required
             />
+            <small style={{ color: '#666', fontSize: '12px', display: 'block', marginTop: '4px' }}>
+              Manager/Employee can login with Employee Code (e.g., ABCD0001)
+            </small>
           </div>
 
           <div className="form-group">

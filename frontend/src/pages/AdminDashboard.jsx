@@ -36,9 +36,9 @@ export default function AdminDashboard() {
         }
 
         const [empRes, leavRes, invRes, payRes, planRes] = await Promise.all([
-          api.get('/auth/employees').catch((err) => {
+          api.get('/company/employees').catch((err) => {
             console.error('Error fetching employees:', err.message);
-            return { data: { employees: [] } };
+            return { data: { data: { employees: [] } } };
           }),
           api.get('/leave/all').catch((err) => {
             console.error('Error fetching leaves:', err.message);
@@ -59,7 +59,7 @@ export default function AdminDashboard() {
         ]);
 
         setStats({
-          employees: empRes.data.employees?.length || 0,
+          employees: (empRes.data.data?.employees || empRes.data.employees)?.length || 0,
           leaves: leavRes.data.leaves?.filter(l => l.status === 'pending').length || 0,
           inventory: invRes.data.items?.length || 0,
           payslips: payRes.data.payslips?.length || 0,

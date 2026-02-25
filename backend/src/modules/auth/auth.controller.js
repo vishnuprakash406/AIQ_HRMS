@@ -140,7 +140,7 @@ export async function loginPassword(req, res) {
     
     // Try to find user in database by email or phone
     const result = await pool.query(
-      'SELECT id, email, phone, full_name, password_hash, role, company_id FROM users WHERE (LOWER(email) = $1 OR LOWER(phone) = $1)',
+      'SELECT id, email, phone, full_name, password_hash, role, company_id, branch_id FROM users WHERE (LOWER(email) = $1 OR LOWER(phone) = $1)',
       [usernameRaw]
     );
     
@@ -177,7 +177,12 @@ export async function loginPassword(req, res) {
       }
     }
     
-    const payload = { sub: user.email || user.phone, role: user.role };
+    const payload = {
+      sub: user.email || user.phone,
+      role: user.role,
+      company_id: user.company_id,
+      branch_id: user.branch_id
+    };
     return res.json({ ...signTokens(payload), user: payload });
   } catch (err) {
     console.error('Login password error:', err);
@@ -198,7 +203,7 @@ export async function resetPasswordWithOtp(req, res) {
     // Update password in database
     const passwordHash = await bcrypt.hash(newPassword, 8);
     const result = await pool.query(
-      'UPDATE users SET password_hash = $1 WHERE LOWER(email) = $2 OR LOWER(phone) = $2 RETURNING email, phone, role',
+      'UPDATE users SET password_hash = $1 WHERE LOWER(email) = $2 OR LOWER(phone) = $2 RETURNING email, phone, role, branch_id',
       [passwordHash, usernameRaw]
     );
     
@@ -207,7 +212,18 @@ export async function resetPasswordWithOtp(req, res) {
     }
     
     const user = result.rows[0];
-    const payload = { sub: user.email || user.phone, role: user.role };
+    // Fetch company_id for the user
+    const userResult = await pool.query(
+      'SELECT company_id FROM users WHERE email = $1 OR phone = $1',
+      [user.email || user.phone]
+    );
+    const companyId = userResult.rows.length > 0 ? userResult.rows[0].company_id : null;
+    const payload = {
+      sub: user.email || user.phone,
+      role: user.role,
+      company_id: companyId,
+      branch_id: user.branch_id
+    };
     return res.json({ message: 'Password reset', ...signTokens(payload), user: payload });
   } catch (err) {
     console.error('Reset password error:', err);

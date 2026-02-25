@@ -18,11 +18,14 @@ import AdminOnboarding from './pages/AdminOnboarding.jsx';
 import AdminLeavePlan from './pages/AdminLeavePlan.jsx';
 import AdminGeofencing from './pages/AdminGeofencing.jsx';
 import AdminAttendance from './pages/AdminAttendance.jsx';
+import AdminBranchDetails from './pages/AdminBranchDetails.jsx';
 import MasterLogin from './pages/MasterLogin.jsx';
 import MasterDashboard from './pages/MasterDashboard.jsx';
 import MasterCompanyDetails from './pages/MasterCompanyDetails.jsx';
 import CompanyLogin from './pages/CompanyLogin.jsx';
 import CompanyDashboard from './pages/CompanyDashboard.jsx';
+import ManagerDashboard from './pages/ManagerDashboard.jsx';
+import AdminEmployeeModuleAccess from './pages/AdminEmployeeModuleAccess.jsx';
 
 function Layout({ children, isAdmin = false }) {
   const handleLogout = () => {
@@ -52,7 +55,7 @@ function Layout({ children, isAdmin = false }) {
         <nav>
           {isAdmin ? (
             <>
-              <Link to="/admin/dashboard">Admin Dashboard</Link>
+              <Link to="/company-dashboard">Company Dashboard</Link>
               <button onClick={handleLogout} style={{background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', textDecoration: 'underline'}}>Logout</button>
             </>
           ) : (
@@ -79,6 +82,9 @@ export default function App() {
       {/* Company Routes */}
       <Route path="/company-login" element={<CompanyLogin />} />
       <Route path="/company-dashboard" element={<CompanyDashboard />} />
+      <Route path="/manager-dashboard" element={<ManagerDashboard />} />
+      <Route path="/admin/branch/:branchId" element={<AdminBranchDetails />} />
+      <Route path="/admin/employee-module-access" element={<AdminEmployeeModuleAccess />} />
 
       {/* Employee Login */}
       <Route path="/login" element={<Login />} />
@@ -153,9 +159,7 @@ export default function App() {
       <Route
         path="/admin/dashboard"
         element={
-          <Layout isAdmin={true}>
-            <AdminDashboard />
-          </Layout>
+          <Navigate to="/company-dashboard" replace />
         }
       />
       <Route

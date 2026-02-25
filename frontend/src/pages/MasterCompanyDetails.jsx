@@ -19,6 +19,7 @@ export default function MasterCompanyDetails() {
     email: '',
     contact_number: '',
     employee_limit: 0,
+    branch_limit: 1,
     is_active: true
   });
 
@@ -63,6 +64,7 @@ export default function MasterCompanyDetails() {
           email: response.data.data.email || '',
           contact_number: response.data.data.contact_number || '',
           employee_limit: response.data.data.employee_limit,
+          branch_limit: response.data.data.branch_limit || 1,
           is_active: response.data.data.is_active
         });
       }
@@ -103,7 +105,7 @@ export default function MasterCompanyDetails() {
     const { name, value, type, checked } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: type === 'checkbox' ? checked : name === 'employee_limit' ? parseInt(value, 10) : value
+      [name]: type === 'checkbox' ? checked : value
     }));
   };
 
@@ -113,8 +115,27 @@ export default function MasterCompanyDetails() {
     setError('');
     setSuccess('');
 
+    // Validate and parse numeric fields
+    const dataToSubmit = {
+      ...formData,
+      employee_limit: parseInt(formData.employee_limit, 10) || 1,
+      branch_limit: parseInt(formData.branch_limit, 10) || 1
+    };
+
+    if (dataToSubmit.employee_limit < 1) {
+      setError('Employee limit must be at least 1');
+      setLoading(false);
+      return;
+    }
+
+    if (dataToSubmit.branch_limit < 1) {
+      setError('Branch limit must be at least 1');
+      setLoading(false);
+      return;
+    }
+
     try {
-      const response = await client.put(`/master/companies/${id}`, formData);
+      const response = await client.put(`/master/companies/${id}`, dataToSubmit);
       if (response.data.status === 'success') {
         setSuccess('✅ Company updated successfully!');
         setIsEditing(false);
@@ -123,6 +144,32 @@ export default function MasterCompanyDetails() {
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to update company');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleStatus = async () => {
+    const newStatus = !company.is_active;
+    const confirmMessage = newStatus 
+      ? `Are you sure you want to ACTIVATE ${company.name}?`
+      : `Are you sure you want to DEACTIVATE ${company.name}? This will prevent the company from accessing the system.`;
+    
+    if (!confirm(confirmMessage)) return;
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await client.put(`/master/companies/${id}`, { is_active: newStatus });
+      if (response.data.status === 'success') {
+        setSuccess(`✅ Company ${newStatus ? 'activated' : 'deactivated'} successfully!`);
+        await fetchCompanyDetails();
+        setTimeout(() => setSuccess(''), 3000);
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update company status');
     } finally {
       setLoading(false);
     }
@@ -291,9 +338,21 @@ export default function MasterCompanyDetails() {
                 <h2>📋 Company Information</h2>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button 
+                    onClick={handleToggleStatus} 
+                    className="btn"
+                    style={{ 
+                      backgroundColor: company.is_active ? '#e74c3c' : '#27ae60', 
+                      color: 'white' 
+                    }}
+                    disabled={loading}
+                    title={company.is_active ? 'Click to deactivate company' : 'Click to activate company'}
+                  >
+                    {company.is_active ? '🔴 Deactivate Company' : '🟢 Activate Company'}
+                  </button>
+                  <button 
                     onClick={() => setShowCompanyPasswordModal(true)} 
                     className="btn"
-                    style={{ backgroundColor: '#e74c3c', color: 'white' }}
+                    style={{ backgroundColor: '#f39c12', color: 'white' }}
                   >
                     🔐 Reset Company Password
                   </button>
@@ -327,6 +386,10 @@ export default function MasterCompanyDetails() {
                       <span className="value">{company.employee_limit}</span>
                     </div>
                     <div className="info-item">
+                      <span className="label">🏢 Branch Limit:</span>
+                      <span className="value">{company.branch_limit || 1}</span>
+                    </div>
+                    <div className="info-item">
                       <span className="label">✨ Status:</span>
                       <span className="value">{company.is_active ? '✅ Active' : '❌ Inactive'}</span>
                     </div>
@@ -346,12 +409,13 @@ export default function MasterCompanyDetails() {
                   </div>
                   <div className="form-row">
                     <div className="form-group">
-                      <label htmlFor="contact_number">📞 Contact Number</label>
-                      <input type="text" id="contact_number" name="contact_number" value={formData.contact_number} onChange={handleInputChange} />
-                    </div>
-                    <div className="form-group">
                       <label htmlFor="employee_limit">👥 Employee Limit</label>
                       <input type="number" id="employee_limit" name="employee_limit" value={formData.employee_limit} onChange={handleInputChange} required />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="branch_limit">🏢 Branch Limit</label>
+                      <input type="number" id="branch_limit" name="branch_limit" value={formData.branch_limit} onChange={handleInputChange} min="1" required />
+                      <small>Maximum number of branches this company can create</small>
                     </div>
                   </div>
                   <div className="form-group" style={{ marginTop: '15px' }}>
@@ -610,7 +674,7 @@ const styles = {
   },
   activeTab: {
     color: '#3498db',
-    borderBottomColor: '#3498db'
+    borderBottom: '3px solid #3498db'
   },
   licenseCard: {
     backgroundColor: 'white',

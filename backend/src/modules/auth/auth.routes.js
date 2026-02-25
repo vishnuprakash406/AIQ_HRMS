@@ -14,6 +14,6 @@ router.post('/reset-password-otp', requireFields(['username', 'otp', 'newPasswor
 router.post('/create-employee', authenticate, requireRole(['admin']), requireFields(['email', 'phone', 'fullName']), createEmployee);
 router.post('/reset-employee-password', authenticate, requireRole(['admin']), requireFields(['userId', 'newPassword']), resetEmployeePassword);
 router.put('/employees/:userId/attendance-mode', authenticate, requireRole(['admin']), requireFields(['attendanceMode']), updateAttendanceMode);
-router.get('/employees', authenticate, requireRole(['admin']), getAllEmployees);
+router.get('/employees', authenticate, requireRole(['admin', 'company_admin']), getAllEmployees);
 
 export default router;

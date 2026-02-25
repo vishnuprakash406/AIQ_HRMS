@@ -34,6 +34,7 @@ export default function MasterDashboard() {
     username: '',
     password: '',
     employee_limit: 50,
+    branch_limit: 1,
     default_modules: []
   });
   const [selectedModules, setSelectedModules] = useState({
@@ -116,7 +117,7 @@ export default function MasterDashboard() {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: name === 'employee_limit' ? parseInt(value, 10) : value
+      [name]: value
     }));
   };
 
@@ -124,6 +125,22 @@ export default function MasterDashboard() {
     e.preventDefault();
     setLoading(true);
     setError('');
+
+    // Validate and parse numeric fields
+    const employee_limit = parseInt(formData.employee_limit, 10) || 50;
+    const branch_limit = parseInt(formData.branch_limit, 10) || 1;
+
+    if (employee_limit < 1) {
+      setError('Employee limit must be at least 1');
+      setLoading(false);
+      return;
+    }
+
+    if (branch_limit < 1) {
+      setError('Branch limit must be at least 1');
+      setLoading(false);
+      return;
+    }
 
     try {
       const default_modules = Object.entries(selectedModules)
@@ -138,6 +155,8 @@ export default function MasterDashboard() {
         },
         body: JSON.stringify({
           ...formData,
+          employee_limit,
+          branch_limit,
           default_modules
         })
       });
@@ -152,6 +171,7 @@ export default function MasterDashboard() {
           username: '',
           password: '',
           employee_limit: 50,
+          branch_limit: 1,
           default_modules: []
         });
         setSelectedModules({
@@ -480,17 +500,33 @@ export default function MasterDashboard() {
                 </div>
               </div>
 
-              <div className="form-group">
-                <label htmlFor="employee_limit">👥 Employee Limit</label>
-                <input
-                  type="number"
-                  id="employee_limit"
-                  name="employee_limit"
-                  value={formData.employee_limit}
-                  onChange={handleFormChange}
-                  min="1"
-                  required
-                />
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="employee_limit">👥 Employee Limit</label>
+                  <input
+                    type="number"
+                    id="employee_limit"
+                    name="employee_limit"
+                    value={formData.employee_limit}
+                    onChange={handleFormChange}
+                    min="1"
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="branch_limit">🏢 Branch Limit</label>
+                  <input
+                    type="number"
+                    id="branch_limit"
+                    name="branch_limit"
+                    value={formData.branch_limit}
+                    onChange={handleFormChange}
+                    min="1"
+                    required
+                  />
+                  <small>Maximum number of branches this company can create</small>
+                </div>
               </div>
 
               <div className="form-group">
@@ -539,6 +575,7 @@ export default function MasterDashboard() {
                     <th>📌 Code</th>
                     <th>🏢 Name</th>
                     <th>👥 Employee Limit</th>
+                    <th>🏢 Branch Limit</th>
                     <th>✓ Status</th>
                     <th>📅 Created</th>
                     <th>⚙️ Actions</th>
@@ -550,6 +587,7 @@ export default function MasterDashboard() {
                       <td><strong>{company.company_code}</strong></td>
                       <td>{company.name}</td>
                       <td>{company.employee_limit}</td>
+                      <td>{company.branch_limit || 1}</td>
                       <td>
                         <span className={`status ${company.is_active ? 'active' : 'inactive'}`}>
                           {company.is_active ? '🟢 Active' : '🔴 Inactive'}
