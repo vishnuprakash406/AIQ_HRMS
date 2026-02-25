@@ -2027,12 +2027,13 @@ export async function getBranchManagerModulePermissions(req, res) {
 
     // Verify manager exists and belongs to branch
     const managerResult = await pool.query(
-      'SELECT id, full_name FROM users WHERE id = $1 AND branch_id = $2 AND role = $3',
-      [managerId, branchId, 'branch_manager']
+      `SELECT id, full_name FROM users 
+       WHERE id = $1 AND branch_id = $2 AND role IN ('branch_manager', 'manager')`,
+      [managerId, branchId]
     );
 
     if (managerResult.rows.length === 0) {
-      console.warn('Manager not found or not branch_manager:', { managerId, branchId });
+      console.warn('Manager not found or not a manager role:', { managerId, branchId });
       return res.status(404).json({
         status: 'error',
         message: 'Manager not found in this branch'
