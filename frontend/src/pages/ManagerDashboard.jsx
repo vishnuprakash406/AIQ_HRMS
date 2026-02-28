@@ -97,7 +97,7 @@ export default function ManagerDashboard() {
 
         console.log('ManagerDashboard Debug:', { token: !!token, userRole, branchId, managerId });
 
-        if (!token || userRole !== 'branch_manager') {
+        if (!token || (userRole !== 'branch_manager' && userRole !== 'manager')) {
           window.location.href = '/company-login';
           return;
         }

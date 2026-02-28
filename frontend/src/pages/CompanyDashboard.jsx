@@ -178,10 +178,10 @@ export default function CompanyDashboard() {
   const openBranchModal = (branch = null) => {
     if (branch) {
       setEditingBranch(branch);
-      setBranchFormData({ name: branch.name, employee_limit: branch.employee_limit });
+      setBranchFormData({ name: branch.name, location: branch.location || '', employee_limit: branch.employee_limit });
     } else {
       setEditingBranch(null);
-      setBranchFormData({ name: '', employee_limit: 0 });
+      setBranchFormData({ name: '', location: '', employee_limit: 0 });
     }
     setShowBranchModal(true);
   };
@@ -189,7 +189,7 @@ export default function CompanyDashboard() {
   const closeBranchModal = () => {
     setShowBranchModal(false);
     setEditingBranch(null);
-    setBranchFormData({ name: '', employee_limit: 0 });
+    setBranchFormData({ name: '', location: '', employee_limit: 0 });
   };
 
   const handleBranchFormChange = (e) => {
@@ -783,6 +783,7 @@ export default function CompanyDashboard() {
                   <thead>
                     <tr>
                       <th>Branch Name</th>
+                      <th>Location</th>
                       <th>Employee Limit</th>
                       <th>Current Employees</th>
                       <th>Utilisation</th>
@@ -812,6 +813,11 @@ export default function CompanyDashboard() {
                             >
                               {branch.name}
                             </button>
+                          </td>
+                          <td>
+                            <span style={{ color: '#666', fontSize: '14px' }}>
+                              📍 {branch.location || 'Not specified'}
+                            </span>
                           </td>
                           <td>{branch.employee_limit}</td>
                           <td>{branch.employee_count || 0}</td>
@@ -874,6 +880,17 @@ export default function CompanyDashboard() {
                     onChange={handleBranchFormChange}
                     placeholder="e.g., Main Branch, North Branch"
                     required
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="branch-location">Branch Location</label>
+                  <input
+                    id="branch-location"
+                    type="text"
+                    name="location"
+                    value={branchFormData.location || ''}
+                    onChange={handleBranchFormChange}
+                    placeholder="e.g., New York, Downtown Office"
                   />
                 </div>
                 <div className="form-group">

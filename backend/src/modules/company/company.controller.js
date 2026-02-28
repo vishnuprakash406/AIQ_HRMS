@@ -223,7 +223,7 @@ export async function getPublicCompanyBranches(req, res) {
     }
 
     const branchesResult = await pool.query(
-      'SELECT id, name FROM branches WHERE company_id = $1 AND is_active = TRUE ORDER BY name',
+      'SELECT id, name, location FROM branches WHERE company_id = $1 AND is_active = TRUE ORDER BY name',
       [companyResult.rows[0].id]
     );
 
@@ -780,7 +780,7 @@ export async function getCompanyBranches(req, res) {
     }
 
     const result = await pool.query(
-      `SELECT b.id, b.name, b.employee_limit, b.is_active, b.created_at,
+      `SELECT b.id, b.name, b.location, b.employee_limit, b.is_active, b.created_at,
               (SELECT COUNT(*) FROM users u WHERE u.branch_id = b.id) as employee_count
        FROM branches b
        WHERE b.company_id = $1 ${branchFilter}
@@ -812,7 +812,7 @@ export async function getCompanyBranches(req, res) {
 export async function createCompanyBranch(req, res) {
   try {
     const companyId = req.user.id;
-    const { name, employee_limit } = req.body;
+    const { name, employee_limit, location } = req.body;
 
     if (!name) {
       return res.status(400).json({
@@ -869,8 +869,8 @@ export async function createCompanyBranch(req, res) {
     }
 
     const result = await pool.query(
-      'INSERT INTO branches (company_id, name, employee_limit) VALUES ($1, $2, $3) RETURNING id, name, employee_limit, is_active, created_at',
-      [companyId, name.trim(), employee_limit]
+      'INSERT INTO branches (company_id, name, employee_limit, location) VALUES ($1, $2, $3, $4) RETURNING id, name, location, employee_limit, is_active, created_at',
+      [companyId, name.trim(), employee_limit, location || null]
     );
 
     return res.status(201).json({
@@ -904,7 +904,7 @@ export async function updateCompanyBranch(req, res) {
   try {
     const companyId = req.user.id;
     const { branchId } = req.params;
-    const { name, employee_limit, is_active } = req.body;
+    const { name, employee_limit, is_active, location } = req.body;
 
     const updates = [];
     const values = [branchId, companyId];
@@ -913,6 +913,12 @@ export async function updateCompanyBranch(req, res) {
     if (name !== undefined) {
       updates.push(`name = $${paramIndex}`);
       values.push(name.trim());
+      paramIndex++;
+    }
+
+    if (location !== undefined) {
+      updates.push(`location = $${paramIndex}`);
+      values.push(location || null);
       paramIndex++;
     }
 
@@ -970,7 +976,7 @@ export async function updateCompanyBranch(req, res) {
     updates.push('updated_at = now()');
 
     const result = await pool.query(
-      `UPDATE branches SET ${updates.join(', ')} WHERE id = $1 AND company_id = $2 RETURNING id, name, employee_limit, is_active, created_at`,
+      `UPDATE branches SET ${updates.join(', ')} WHERE id = $1 AND company_id = $2 RETURNING id, name, location, employee_limit, is_active, created_at`,
       values
     );
 
@@ -1975,10 +1981,10 @@ export async function getBranchManagerModulePermissions(req, res) {
     });
 
     // Authorization check
-    if (userRole === 'branch_manager') {
-      // For branch managers: must be requesting their own modules
+    if (userRole === 'branch_manager' || userRole === 'manager') {
+      // For branch managers and managers: must be requesting their own modules
       if (!userId) {
-        console.error('ERROR: Branch manager token missing user_id');
+        console.error('ERROR: Manager token missing user_id');
         return res.status(403).json({
           status: 'error',
           message: 'Invalid token: missing user_id'
@@ -2084,7 +2090,7 @@ export async function getManagerAccessibleBranches(req, res) {
     console.log('Request:', { managerId });
 
     // Authorization: branch managers can only fetch their own branches
-    if (userRole === 'branch_manager') {
+    if (userRole === 'branch_manager' || userRole === 'manager') {
       const managerIdStr = String(managerId).trim();
       const userIdStr = String(userId).trim();
       if (managerIdStr !== userIdStr) {
@@ -2102,32 +2108,55 @@ export async function getManagerAccessibleBranches(req, res) {
     }
 
     // First check manager_branches table for explicit assignments
-    let branchesResult = await pool.query(
-      `SELECT 
-        b.id, 
-        b.name,
-        b.is_active,
-        mb.is_primary
-       FROM branches b
-       LEFT JOIN manager_branches mb ON b.id = mb.branch_id AND mb.manager_user_id = $1
-       WHERE mb.manager_user_id = $1
-       ORDER BY mb.is_primary DESC, b.name`,
-      [managerId]
-    );
-
-    // If no manager_branches entries, fall back to the user's assigned branch
-    if (branchesResult.rows.length === 0) {
+    console.log('Querying manager_branches table for managerId:', managerId);
+    let branchesResult = { rows: [] };
+    
+    try {
       branchesResult = await pool.query(
         `SELECT 
           b.id, 
           b.name,
           b.is_active,
-          TRUE as is_primary
+          mb.is_primary
          FROM branches b
-         INNER JOIN users u ON u.branch_id = b.id
-         WHERE u.id = $1 AND b.is_active = TRUE`,
+         LEFT JOIN manager_branches mb ON b.id = mb.branch_id AND mb.manager_user_id = $1
+         WHERE mb.manager_user_id = $1
+         ORDER BY mb.is_primary DESC, b.name`,
         [managerId]
       );
+      console.log('manager_branches query succeeded, rows found:', branchesResult.rows.length);
+    } catch (dbError) {
+      console.warn('Error querying manager_branches table (table might not exist) - fallback to user assignment:', dbError.message);
+      branchesResult = { rows: [] };
+    }
+
+    // If no manager_branches entries, fall back to the user's assigned branch
+    if (branchesResult.rows.length === 0) {
+      console.log('No branches found in manager_branches, falling back to user branch allocation for managerId:', managerId);
+      try {
+        branchesResult = await pool.query(
+          `SELECT 
+            b.id, 
+            b.name,
+            b.is_active,
+            TRUE as is_primary
+           FROM branches b
+           INNER JOIN users u ON u.branch_id = b.id
+           WHERE u.id = $1 AND b.is_active = TRUE`,
+          [managerId]
+        );
+        console.log('User branch query succeeded, rows found:', branchesResult.rows.length);
+        
+        // If still no results, log a warning but return empty array (graceful fallback)
+        if (branchesResult.rows.length === 0) {
+          console.warn('No branches assigned to manager:', managerId);
+        }
+      } catch (fallbackError) {
+        console.error('Error in fallback query:', fallbackError.message);
+        // Return gracefully with empty array instead of error
+        // The manager may not have any branches assigned yet
+        branchesResult = { rows: [] };
+      }
     }
 
     console.log('Accessible branches found:', branchesResult.rows.length);
@@ -2138,10 +2167,10 @@ export async function getManagerAccessibleBranches(req, res) {
       branches: branchesResult.rows || []
     });
   } catch (error) {
-    console.error('Get manager accessible branches error:', error);
+    console.error('Get manager accessible branches error:', error.message, error.stack);
     return res.status(500).json({
       status: 'error',
-      message: 'Internal server error'
+      message: 'Internal server error: ' + error.message
     });
   }
 }
@@ -2485,6 +2514,25 @@ export async function setBranchModules(req, res) {
         }
       }
 
+      // Auto-assign modules to all managers in this branch
+      const managersResult = await client.query(
+        `SELECT id FROM users WHERE branch_id = $1 AND role IN ('branch_manager', 'manager')`,
+        [branchId]
+      );
+
+      for (const manager of managersResult.rows) {
+        for (const module of modules) {
+          const { module_name, can_view = false, can_edit = false, can_delete = false } = module;
+          if (can_view || can_edit || can_delete) {
+            await client.query(
+              `INSERT INTO branch_manager_modules (branch_id, manager_user_id, module_name, is_enabled, can_view, can_modify, can_update)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [branchId, manager.id, module_name, true, can_view, can_edit, can_delete]
+            );
+          }
+        }
+      }
+
       await client.query('COMMIT');
 
       return res.status(200).json({
@@ -2500,6 +2548,95 @@ export async function setBranchModules(req, res) {
     }
   } catch (error) {
     console.error('Set branch modules error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Internal server error'
+    });
+  }
+}
+
+/**
+ * Assign Multiple Branches to a Manager
+ * POST /managers/:managerId/assign-branches
+ * Body: { branchIds: [array of branch IDs] }
+ * Assigns one or more branches to a specific manager
+ */
+export async function assignBranchesToManager(req, res) {
+  try {
+    const { managerId } = req.params;
+    const { branchIds } = req.body;
+    const companyId = req.user.company_id;
+
+    if (!managerId || !branchIds || !Array.isArray(branchIds) || branchIds.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Manager ID and at least one branch ID are required'
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Verify manager exists and belongs to this company
+      const managerResult = await client.query(
+        `SELECT id, company_id FROM users WHERE id = $1 AND company_id = $2 AND role IN ('branch_manager', 'manager')`,
+        [managerId, companyId]
+      );
+
+      if (managerResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({
+          status: 'error',
+          message: 'Manager not found'
+        });
+      }
+
+      // Verify all branches exist and belong to this company
+      const branchesResult = await client.query(
+        `SELECT id FROM branches WHERE company_id = $1 AND id = ANY($2)`,
+        [companyId, branchIds]
+      );
+
+      if (branchesResult.rows.length !== branchIds.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          status: 'error',
+          message: 'One or more branches do not exist or do not belong to this company'
+        });
+      }
+
+      // Clear existing branch assignments for this manager
+      await client.query(
+        `DELETE FROM manager_branches WHERE manager_user_id = $1`,
+        [managerId]
+      );
+
+      // Insert new branch assignments
+      for (const branchId of branchIds) {
+        await client.query(
+          `INSERT INTO manager_branches (manager_user_id, branch_id, is_primary, created_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (manager_user_id, branch_id) DO NOTHING`,
+          [managerId, branchId, branchIds.indexOf(branchId) === 0] // First branch is primary
+        );
+      }
+
+      await client.query('COMMIT');
+
+      return res.status(200).json({
+        status: 'success',
+        message: 'Branches assigned to manager successfully',
+        assignedBranches: branchIds.length
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Assign branches to manager error:', error);
     return res.status(500).json({
       status: 'error',
       message: 'Internal server error'

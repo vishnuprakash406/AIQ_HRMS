@@ -159,10 +159,10 @@ export function verifyCompanyOrBranchManagerToken(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    if (!['company_admin', 'branch_manager'].includes(decoded.role)) {
+    if (!['company_admin', 'branch_manager', 'manager'].includes(decoded.role)) {
       return res.status(403).json({
         status: 'error',
-        message: 'Only company admins or branch managers can access this endpoint'
+        message: 'Only company admins or managers can access this endpoint'
       });
     }
 

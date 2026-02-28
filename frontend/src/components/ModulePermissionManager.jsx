@@ -19,7 +19,7 @@ const ModulePermissionManager = ({ branchId, managerId, onClose, onUpdate }) => 
     const fetchManagerModules = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('companyToken');
         const response = await client.get(
           `/company/branches/${branchId}/managers/${managerId}/modules`,
           { headers: { Authorization: `Bearer ${token}` } }
@@ -37,7 +37,7 @@ const ModulePermissionManager = ({ branchId, managerId, onClose, onUpdate }) => 
     // Fetch available modules (from company)
     const fetchAvailableModules = async () => {
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('companyToken');
         const response = await client.get('/company/modules', {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -62,7 +62,7 @@ const ModulePermissionManager = ({ branchId, managerId, onClose, onUpdate }) => 
 
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('companyToken');
       
       await client.post(
         `/company/branches/${branchId}/managers/${managerId}/modules`,
@@ -102,7 +102,7 @@ const ModulePermissionManager = ({ branchId, managerId, onClose, onUpdate }) => 
   const handleUpdatePermissions = async (moduleName, newPermissions) => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('companyToken');
 
       await client.put(
         `/company/branches/${branchId}/managers/${managerId}/modules/${moduleName}`,
@@ -137,7 +137,7 @@ const ModulePermissionManager = ({ branchId, managerId, onClose, onUpdate }) => 
 
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('companyToken');
 
       await client.delete(
         `/company/branches/${branchId}/managers/${managerId}/modules/${moduleName}`,

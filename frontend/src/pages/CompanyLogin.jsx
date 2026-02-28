@@ -63,15 +63,17 @@ export default function CompanyLogin() {
         localStorage.setItem('branch_name', data.branch_name || '');
 
         // Decode token and extract user_id for branch managers
-        if (role === 'branch_manager') {
+        if (role === 'branch_manager' || role === 'manager') {
           const decodedToken = decodeToken(data.token);
           if (decodedToken && decodedToken.user_id) {
             localStorage.setItem('manager_id', decodedToken.user_id);
           }
+          // Redirect to branch selection for managers
+          navigate('/manager-branch-selection');
+        } else {
+          // Redirect to company dashboard for company admin
+          navigate('/company-dashboard');
         }
-
-        // Redirect to company dashboard
-        navigate('/company-dashboard');
       } else {
         setError(data.message || 'Login failed');
       }

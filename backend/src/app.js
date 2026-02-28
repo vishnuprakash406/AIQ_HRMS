@@ -9,8 +9,28 @@ import { errorHandler, notFound } from './middleware/errorHandler.js';
 
 const app = express();
 
+const allowedOrigins = (env.corsOrigin || '')
+	.split(',')
+	.map((value) => value.trim())
+	.filter(Boolean);
+
+const corsOptions = {
+	origin: (origin, callback) => {
+		if (!origin) {
+			return callback(null, true);
+		}
+
+		if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+			return callback(null, true);
+		}
+
+		return callback(new Error('CORS origin not allowed'));
+	},
+	credentials: true
+};
+
 app.use(helmet());
-app.use(cors({ origin: env.corsOrigin, credentials: true }));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '2mb' }));
 app.use(morgan('dev'));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));

@@ -24,7 +24,8 @@ import MasterDashboard from './pages/MasterDashboard.jsx';
 import MasterCompanyDetails from './pages/MasterCompanyDetails.jsx';
 import CompanyLogin from './pages/CompanyLogin.jsx';
 import CompanyDashboard from './pages/CompanyDashboard.jsx';
-import ManagerDashboard from './pages/ManagerDashboard.jsx';
+import BranchDashboard from './pages/BranchDashboard.jsx';
+import ManagerBranchSelection from './pages/ManagerBranchSelection.jsx';
 import AdminEmployeeModuleAccess from './pages/AdminEmployeeModuleAccess.jsx';
 
 function Layout({ children, isAdmin = false }) {
@@ -82,7 +83,9 @@ export default function App() {
       {/* Company Routes */}
       <Route path="/company-login" element={<CompanyLogin />} />
       <Route path="/company-dashboard" element={<CompanyDashboard />} />
-      <Route path="/manager-dashboard" element={<ManagerDashboard />} />
+      <Route path="/manager-branch-selection" element={<ManagerBranchSelection />} />
+      <Route path="/branch-dashboard" element={<BranchDashboard />} />
+      <Route path="/manager-dashboard" element={<BranchDashboard />} />
       <Route path="/admin/branch/:branchId" element={<AdminBranchDetails />} />
       <Route path="/admin/employee-module-access" element={<AdminEmployeeModuleAccess />} />
 

@@ -25,6 +25,7 @@ router.get('/branches/:branchId/managers', verifyCompanyToken, companyController
 router.post('/branches/:branchId/managers', verifyCompanyToken, companyController.createBranchManager);
 router.get('/branches/:branchId/managers/:managerId/modules', verifyCompanyOrBranchManagerToken, companyController.getBranchManagerModulePermissions);
 router.get('/managers/:managerId/branches', verifyCompanyOrBranchManagerToken, companyController.getManagerAccessibleBranches);
+router.post('/managers/:managerId/assign-branches', verifyCompanyToken, companyController.assignBranchesToManager);
 router.post('/branches/:branchId/managers/:managerId/modules', verifyCompanyToken, companyController.assignModuleToBranchManager);
 router.put('/branches/:branchId/managers/:managerId/modules/:moduleName', verifyCompanyToken, companyController.updateBranchManagerModulePermission);
 router.delete('/branches/:branchId/managers/:managerId/modules/:moduleName', verifyCompanyToken, companyController.removeModuleFromBranchManager);
