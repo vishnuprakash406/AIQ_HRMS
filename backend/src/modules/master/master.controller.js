@@ -1,8 +1,9 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pool from '../../db/pool.js';
+import { env } from '../../config/env.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET = env.jwtSecret;
 
 /**
  * Master Login
@@ -174,10 +175,10 @@ export async function createCompany(req, res) {
     try {
       await client.query('BEGIN');
 
-      // Insert company
+      // Insert company (schema does not include username/password)
       const companyResult = await client.query(
-        'INSERT INTO companies (company_code, name, username, password_hash, email, contact_number, employee_limit, branch_limit) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, company_code, name, employee_limit, branch_limit',
-        [company_code, name, username, hashedPassword, email || null, contact_number || null, employee_limit, branch_limit]
+        'INSERT INTO companies (company_code, name, email, contact_number, employee_limit, branch_limit) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, company_code, name, employee_limit, branch_limit',
+        [company_code, name, email || null, contact_number || null, employee_limit, branch_limit]
       );
 
       const company = companyResult.rows[0];
@@ -204,22 +205,43 @@ export async function createCompany(req, res) {
         );
       }
 
+      let mainBranchId = null;
       if (branches.length > 0) {
         for (const branch of branches) {
           if (!branch?.name) {
             throw new Error('Branch name is required');
           }
           const branchLimit = Number.isInteger(branch.employee_limit) ? branch.employee_limit : 0;
-          await client.query(
-            'INSERT INTO branches (company_id, name, employee_limit) VALUES ($1, $2, $3)',
+          const bRes = await client.query(
+            'INSERT INTO branches (company_id, name, employee_limit) VALUES ($1, $2, $3) RETURNING id',
             [company.id, branch.name.trim(), branchLimit]
           );
+          if (!mainBranchId) mainBranchId = bRes.rows[0].id;
         }
       } else {
-        await client.query(
-          'INSERT INTO branches (company_id, name, employee_limit) VALUES ($1, $2, $3)',
+        const bRes = await client.query(
+          'INSERT INTO branches (company_id, name, employee_limit) VALUES ($1, $2, $3) RETURNING id',
           [company.id, 'Main Branch', 0]
         );
+        mainBranchId = bRes.rows[0].id;
+      }
+
+      // Create a company admin user (store credentials in users table)
+      try {
+        const employeeCodeResult = await client.query(
+          'SELECT generate_employee_code($1::UUID) as employee_code',
+          [company.id]
+        );
+        const employeeCode = employeeCodeResult.rows[0].employee_code;
+
+        const fullName = `${name} Admin`;
+        await client.query(
+          'INSERT INTO users (company_id, branch_id, email, phone, full_name, password_hash, role, employee_code) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+          [company.id, mainBranchId, email || null, contact_number || null, fullName, hashedPassword, 'company_admin', employeeCode]
+        );
+      } catch (userErr) {
+        console.error('Failed to create company admin user', userErr);
+        // proceed without failing company creation; admin can be created later
       }
 
       // Create default license (1 year from now)
